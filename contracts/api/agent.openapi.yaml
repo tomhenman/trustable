@@ -1,0 +1,433 @@
+openapi: 3.0.3
+info:
+  title: Trustable Agent (Copilot) API
+  description: |
+    AI Copilot API for conversational brand analysis and action execution.
+    
+    The agent operates in three modes:
+    - **Diagnose**: Identify issues and root causes
+    - **Action**: Generate task lists and templates
+    - **Report**: Produce executive summaries
+    
+    Plan gating controls access:
+    - FREE: No copilot access
+    - STARTER: Advice only (read-only tools)
+    - PROFESSIONAL+: Full execution (all tools)
+  version: 1.0.0
+
+servers:
+  - url: https://{project}.supabase.co/functions/v1
+    variables:
+      project:
+        default: your-project-ref
+
+security:
+  - bearerAuth: []
+
+paths:
+  /agent/threads:
+    post:
+      operationId: createThread
+      summary: Create a new conversation thread
+      tags: [Agent]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand_id]
+              properties:
+                brand_id:
+                  type: string
+                  format: uuid
+                mode:
+                  $ref: '#/components/schemas/AgentMode'
+      responses:
+        '201':
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '403':
+          description: Copilot not available on current plan
+
+    get:
+      operationId: listThreads
+      summary: List conversation threads
+      description: |
+        **Implementation:** Direct Supabase client query
+        ```typescript
+        const { data } = await supabase
+          .from('agent_threads')
+          .select('*')
+          .eq('user_id', userId)
+          .order('updated_at', { ascending: false })
+          .limit(20);
+        ```
+        
+        Filter by brand:
+        ```typescript
+        .eq('business_id', brandId)
+        ```
+      tags: [Agent]
+      x-implementation: supabase-client
+      x-table: agent_threads
+      parameters:
+        - name: brand_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of threads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Thread'
+
+  /agent/threads/{threadId}:
+    get:
+      operationId: getThread
+      summary: Get thread with message history
+      tags: [Agent]
+      parameters:
+        - $ref: '#/components/parameters/threadId'
+        - name: include_messages
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Thread details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadWithMessages'
+
+  /agent/threads/{threadId}/messages:
+    post:
+      operationId: sendMessage
+      summary: Send a message to the agent
+      tags: [Agent]
+      parameters:
+        - $ref: '#/components/parameters/threadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '403':
+          description: Message limit reached or tool not available on plan
+        '429':
+          description: Rate limit exceeded
+
+  /agent/threads/{threadId}/messages/stream:
+    post:
+      operationId: sendMessageStream
+      summary: Send a message and receive streaming response
+      description: |
+        **Status:** ⚠️ NOT IMPLEMENTED
+        
+        Streaming is not currently supported. Use the non-streaming endpoint instead.
+        
+        For real-time UX, consider:
+        1. Show loading state while awaiting response
+        2. Use optimistic UI updates
+        3. Poll for completion if needed
+        
+        Future implementation would use Server-Sent Events (SSE).
+      tags: [Agent]
+      x-implementation: not-implemented
+      x-reason: SSE requires different architecture; polling works for MVP
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/threadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Streaming not implemented. Use /messages endpoint instead."
+
+  /agent/tools:
+    get:
+      operationId: listTools
+      summary: List available tools for current plan
+      description: |
+        **Implementation:** Edge Function `agent-chat` with `action: list_tools`
+        ```typescript
+        const { data } = await supabase.functions.invoke('agent-chat', {
+          body: { action: 'list_tools', userId: user.id }
+        });
+        // Returns: { available: [...], locked: [...], plan: 'STARTER' }
+        ```
+      tags: [Agent]
+      x-implementation: edge-function
+      x-function: agent-chat
+      x-action: list_tools
+      responses:
+        '200':
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    type: string
+                    description: User's current plan
+                  available:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tool'
+                  locked:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tool'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    threadId:
+      name: threadId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    AgentMode:
+      type: string
+      enum: [diagnose, action, report]
+      description: |
+        - diagnose: Identify issues and root causes
+        - action: Generate task lists and templates
+        - report: Produce executive summaries
+
+    Thread:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        brand_id:
+          type: string
+          format: uuid
+        mode:
+          $ref: '#/components/schemas/AgentMode'
+        message_count:
+          type: integer
+        last_message_preview:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ThreadWithMessages:
+      allOf:
+        - $ref: '#/components/schemas/Thread'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        thread_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        response:
+          $ref: '#/components/schemas/OpinionatedResponse'
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        created_at:
+          type: string
+          format: date-time
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        mode:
+          $ref: '#/components/schemas/AgentMode'
+
+    AgentResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        usage:
+          type: object
+          properties:
+            messages_today:
+              type: integer
+            messages_limit:
+              type: integer
+            tools_executed:
+              type: integer
+
+    OpinionatedResponse:
+      type: object
+      description: Structured response format (no waffling)
+      properties:
+        mode:
+          $ref: '#/components/schemas/AgentMode'
+        what_i_think:
+          type: string
+        why_it_matters:
+          type: string
+        top_fixes:
+          type: array
+          items:
+            type: object
+            properties:
+              rank:
+                type: integer
+              fix:
+                type: string
+              impact:
+                type: string
+                enum: [high, medium, low]
+              effort:
+                type: string
+                enum: [easy, medium, hard]
+              exact_wording:
+                type: string
+        do_today:
+          type: array
+          items:
+            type: string
+        do_this_week:
+          type: array
+          items:
+            type: string
+
+    ToolCall:
+      type: object
+      properties:
+        tool:
+          type: string
+        parameters:
+          type: object
+        result:
+          type: object
+        error:
+          type: string
+
+    Confidence:
+      type: object
+      properties:
+        level:
+          type: string
+          enum: [high, medium, low]
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        reasoning:
+          type: string
+        missing_data:
+          type: array
+          items:
+            type: string
+        would_improve_with:
+          type: array
+          items:
+            type: string
+
+    Citation:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [scan, audit, prompt_set, review, competitor_analysis]
+        id:
+          type: string
+        date:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        link:
+          type: string
+
+    Tool:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [analysis, strategy, content, simulation, reporting]
+        requires_plan:
+          type: string
+          enum: [FREE, STARTER, PROFESSIONAL, SCALE, CUSTOM]
+        executes_action:
+          type: boolean

@@ -1,0 +1,626 @@
+openapi: 3.0.3
+info:
+  title: Trustable Edge Functions API
+  description: |
+    Supabase Edge Functions that power Trustable's core operations.
+    
+    ## Calling Edge Functions
+    
+    All functions are called via `supabase.functions.invoke()`:
+    
+    ```typescript
+    const { data, error } = await supabase.functions.invoke('function-name', {
+      body: { /* request body */ }
+    });
+    ```
+    
+    ## Authentication
+    
+    Functions automatically receive the user's JWT from the Supabase client.
+    No manual auth header needed when using the JS client.
+    
+    ## Error Handling
+    
+    All functions return consistent error shapes:
+    ```json
+    { "error": "Error message", "code": "ERROR_CODE" }
+    ```
+    
+    Common status codes:
+    - 400: Bad request (missing/invalid params)
+    - 403: Plan limit exceeded or feature not available
+    - 404: Resource not found
+    - 429: Rate limit exceeded
+    - 500: Internal error
+  version: 1.0.0
+
+servers:
+  - url: https://{project}.supabase.co/functions/v1
+    variables:
+      project:
+        default: your-project-ref
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ===========================================================================
+  # AI QUERY
+  # ===========================================================================
+  /ai-query:
+    post:
+      operationId: aiQuery
+      summary: Query a single AI platform
+      description: |
+        Low-level function to send a prompt to one AI platform and get the response.
+        Used internally by `run-scan`. Rarely called directly.
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('ai-query', {
+          body: { platform: 'chatgpt', prompt: 'Tell me about Acme Corp' }
+        });
+        ```
+      tags: [Core]
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, prompt]
+              properties:
+                platform:
+                  type: string
+                  enum: [chatgpt, claude, perplexity, google_ai, gemini, copilot, grok, deepseek]
+                prompt:
+                  type: string
+                  maxLength: 4000
+      responses:
+        '200':
+          description: AI response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  model:
+                    type: string
+                  responseTimeMs:
+                    type: integer
+                  tokenCount:
+                    type: integer
+
+  # ===========================================================================
+  # RUN SCAN
+  # ===========================================================================
+  /run-scan:
+    post:
+      operationId: runScan
+      summary: Execute a full AI visibility scan
+      description: |
+        Orchestrates a complete scan:
+        1. Generates prompts based on business context
+        2. Queries configured AI platforms
+        3. Analyzes responses for mentions, sentiment, recommendations
+        4. Calculates scores
+        5. Stores results
+        6. Creates alerts if needed
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('run-scan', {
+          body: {
+            businessId: 'uuid',
+            scanType: 'FULL',
+            platforms: ['chatgpt', 'perplexity']
+          }
+        });
+        ```
+      tags: [Core]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                scanType:
+                  type: string
+                  enum: [FULL, QUICK, COMPETITOR, LOCAL]
+                  default: FULL
+                platforms:
+                  type: array
+                  items:
+                    type: string
+                  default: [chatgpt]
+      responses:
+        '200':
+          description: Scan completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  scanId:
+                    type: string
+                    format: uuid
+                  scores:
+                    $ref: '#/components/schemas/Scores'
+                  resultsCount:
+                    type: integer
+                  highlights:
+                    type: array
+                    items:
+                      type: string
+                  criticalIssues:
+                    type: array
+                    items:
+                      type: string
+        '403':
+          description: Scan limit exceeded
+
+  # ===========================================================================
+  # SITE AUDIT
+  # ===========================================================================
+  /site-audit:
+    post:
+      operationId: siteAudit
+      summary: Run a website audit for AI-readiness
+      description: |
+        Crawls a website and checks for:
+        - Technical SEO issues
+        - Content quality
+        - Schema markup
+        - AI-optimization signals
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('site-audit', {
+          body: { businessId: 'uuid', url: 'https://example.com' }
+        });
+        ```
+      tags: [Core]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                url:
+                  type: string
+                  format: uri
+                  description: Optional - uses business.website if not provided
+                maxPages:
+                  type: integer
+                  default: 20
+      responses:
+        '200':
+          description: Audit completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  auditId:
+                    type: string
+                    format: uuid
+                  overallScore:
+                    type: integer
+                  criticalIssues:
+                    type: array
+                    items:
+                      type: object
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+
+  # ===========================================================================
+  # GENERATE CONTENT
+  # ===========================================================================
+  /generate-content:
+    post:
+      operationId: generateContent
+      summary: Generate AI-optimized content
+      description: |
+        Creates content optimized for AI visibility:
+        - About pages
+        - Service pages
+        - FAQ sections
+        - Blog posts
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('generate-content', {
+          body: {
+            businessId: 'uuid',
+            contentType: 'ABOUT_PAGE',
+            topic: 'Our company history'
+          }
+        });
+        ```
+      tags: [Content]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId, contentType]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                contentType:
+                  type: string
+                  enum: [ABOUT_PAGE, SERVICE_PAGE, FAQ_PAGE, BLOG_POST, LOCAL_SERVICE_PAGE]
+                topic:
+                  type: string
+                tone:
+                  type: string
+                  default: professional
+                wordCountTarget:
+                  type: integer
+                  default: 800
+      responses:
+        '200':
+          description: Content generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  contentId:
+                    type: string
+                    format: uuid
+                  content:
+                    type: string
+                  wordCount:
+                    type: integer
+                  aiOptimizationScore:
+                    type: integer
+
+  # ===========================================================================
+  # GENERATE RECOMMENDATIONS
+  # ===========================================================================
+  /generate-recommendations:
+    post:
+      operationId: generateRecommendations
+      summary: Generate actionable recommendations
+      description: |
+        Analyzes current scores and generates prioritized recommendations.
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('generate-recommendations', {
+          body: { businessId: 'uuid' }
+        });
+        ```
+      tags: [Analysis]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                focusArea:
+                  type: string
+                  enum: [visibility, trust, content, technical]
+      responses:
+        '200':
+          description: Recommendations generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  recommendations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        priority:
+                          type: string
+                          enum: [CRITICAL, HIGH, MEDIUM, LOW]
+                        title:
+                          type: string
+                        description:
+                          type: string
+                        estimatedImpact:
+                          type: integer
+
+  # ===========================================================================
+  # COMPETITOR SCAN
+  # ===========================================================================
+  /competitor-scan:
+    post:
+      operationId: competitorScan
+      summary: Scan competitors for benchmarking
+      description: |
+        Queries AI about competitors to build benchmark data.
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('competitor-scan', {
+          body: { businessId: 'uuid', competitors: ['Competitor A', 'Competitor B'] }
+        });
+        ```
+      tags: [Analysis]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                competitors:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional - uses business.competitors if not provided
+      responses:
+        '200':
+          description: Competitor scan completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  benchmarks:
+                    type: array
+                    items:
+                      type: object
+
+  # ===========================================================================
+  # EXPORT REPORT
+  # ===========================================================================
+  /export-report:
+    post:
+      operationId: exportReport
+      summary: Export a report in JSON or CSV
+      description: |
+        Generates exportable reports. Requires PROFESSIONAL plan or higher.
+        
+        ```typescript
+        const { data } = await supabase.functions.invoke('export-report', {
+          body: {
+            businessId: 'uuid',
+            reportType: 'full',
+            format: 'json'
+          }
+        });
+        ```
+      tags: [Reporting]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId]
+              properties:
+                businessId:
+                  type: string
+                  format: uuid
+                reportType:
+                  type: string
+                  enum: [scan, audit, competitor, full, digest]
+                  default: full
+                format:
+                  type: string
+                  enum: [json, csv]
+                  default: json
+                scanId:
+                  type: string
+                  format: uuid
+                whiteLabel:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Report generated
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: Export requires Professional plan
+
+  # ===========================================================================
+  # AGENT CHAT
+  # ===========================================================================
+  /agent-chat:
+    post:
+      operationId: agentChat
+      summary: AI Copilot interactions
+      description: |
+        Multi-action endpoint for the AI Copilot. Action is specified in body.
+        
+        **Actions:**
+        - `create_thread` - Start new conversation
+        - `get_history` - Get thread messages
+        - `send_message` - Send message and get response
+        - `list_tools` - List available tools for plan
+        - `approve_tool` - Approve pending tool execution
+        
+        ```typescript
+        // Create thread
+        await supabase.functions.invoke('agent-chat', {
+          body: { action: 'create_thread', userId: 'uuid', businessId: 'uuid' }
+        });
+        
+        // Send message
+        await supabase.functions.invoke('agent-chat', {
+          body: { action: 'send_message', threadId: 'uuid', userId: 'uuid', message: 'Hello' }
+        });
+        ```
+      tags: [Agent]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, userId]
+              properties:
+                action:
+                  type: string
+                  enum: [create_thread, get_history, send_message, list_tools, approve_tool]
+                userId:
+                  type: string
+                  format: uuid
+                businessId:
+                  type: string
+                  format: uuid
+                threadId:
+                  type: string
+                  format: uuid
+                message:
+                  type: string
+                toolAuditId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Action completed
+          content:
+            application/json:
+              schema:
+                type: object
+        '403':
+          description: Agent not available on FREE plan
+        '429':
+          description: Daily message limit reached
+
+  # ===========================================================================
+  # SCHEDULED MONITOR
+  # ===========================================================================
+  /scheduled-monitor:
+    post:
+      operationId: scheduledMonitor
+      summary: Run scheduled monitoring tasks
+      description: |
+        Internal function called by cron. Processes due prompts and triggers scans.
+        
+        **Not for direct use.** Called automatically by pg_cron.
+      tags: [Internal]
+      x-internal: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                batchSize:
+                  type: integer
+                  default: 50
+      responses:
+        '200':
+          description: Monitoring run completed
+
+  # ===========================================================================
+  # EMAIL REPORTS
+  # ===========================================================================
+  /email-reports:
+    post:
+      operationId: emailReports
+      summary: Send email reports and digests
+      description: |
+        Sends queued emails (digests, alerts, reports).
+        
+        **Not for direct use.** Called by cron or internally.
+      tags: [Internal]
+      x-internal: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                batchSize:
+                  type: integer
+                  default: 20
+      responses:
+        '200':
+          description: Emails processed
+
+  # ===========================================================================
+  # INTEGRATIONS INGEST
+  # ===========================================================================
+  /integrations-ingest:
+    post:
+      operationId: integrationsIngest
+      summary: Ingest data from connected integrations
+      description: |
+        Pulls data from GA4, GSC, review platforms.
+        
+        **Not for direct use.** Called by sync jobs.
+      tags: [Internal]
+      x-internal: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                integrationId:
+                  type: string
+                  format: uuid
+                syncType:
+                  type: string
+                  enum: [full, incremental]
+      responses:
+        '200':
+          description: Data ingested
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Scores:
+      type: object
+      properties:
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        ai_trust_score:
+          type: integer
+        ai_visibility_score:
+          type: integer
+        ai_recommendation_score:
+          type: integer
+        ai_citation_score:
+          type: integer
+        sentiment_score:
+          type: integer

@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Trustable Outbound Webhooks",
+  "description": "Webhook payloads that Trustable sends to external systems",
+  
+  "definitions": {
+    "WebhookEnvelope": {
+      "type": "object",
+      "required": ["event", "timestamp", "payload"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "description": "Event type identifier"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of event"
+        },
+        "webhook_id": {
+          "type": "string",
+          "description": "Unique identifier for this webhook delivery"
+        },
+        "payload": {
+          "type": "object",
+          "description": "Event-specific payload"
+        }
+      }
+    },
+
+    "ScoreChangedPayload": {
+      "type": "object",
+      "required": ["brand_id", "brand_name", "score_type", "previous_value", "current_value"],
+      "properties": {
+        "brand_id": { "type": "string", "format": "uuid" },
+        "brand_name": { "type": "string" },
+        "score_type": {
+          "type": "string",
+          "enum": ["trust", "visibility", "recommendation", "sentiment", "overall"]
+        },
+        "previous_value": { "type": "number" },
+        "current_value": { "type": "number" },
+        "change": { "type": "number" },
+        "calculated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "AlertTriggeredPayload": {
+      "type": "object",
+      "required": ["alert_id", "brand_id", "type", "severity", "message"],
+      "properties": {
+        "alert_id": { "type": "string", "format": "uuid" },
+        "brand_id": { "type": "string", "format": "uuid" },
+        "brand_name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["score_decline", "competitor_surge", "brand_safety", "trust_drift"]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "warning", "info"]
+        },
+        "message": { "type": "string" },
+        "details": { "type": "object" },
+        "recommended_action": { "type": "string" },
+        "triggered_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "ScanCompletedPayload": {
+      "type": "object",
+      "required": ["scan_id", "brand_id", "status", "results_summary"],
+      "properties": {
+        "scan_id": { "type": "string", "format": "uuid" },
+        "brand_id": { "type": "string", "format": "uuid" },
+        "brand_name": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "partial", "failed"]
+        },
+        "results_summary": {
+          "type": "object",
+          "properties": {
+            "total_queries": { "type": "integer" },
+            "mentioned_count": { "type": "integer" },
+            "recommended_count": { "type": "integer" },
+            "platforms_scanned": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "completed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "CompetitorActivityPayload": {
+      "type": "object",
+      "required": ["brand_id", "competitor_id", "competitor_name", "activity_type"],
+      "properties": {
+        "brand_id": { "type": "string", "format": "uuid" },
+        "competitor_id": { "type": "string", "format": "uuid" },
+        "competitor_name": { "type": "string" },
+        "activity_type": {
+          "type": "string",
+          "enum": ["score_increase", "visibility_surge", "new_content", "review_spike"]
+        },
+        "details": {
+          "type": "object",
+          "properties": {
+            "previous_value": { "type": "number" },
+            "current_value": { "type": "number" },
+            "change": { "type": "number" }
+          }
+        },
+        "detected_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "ReportGeneratedPayload": {
+      "type": "object",
+      "required": ["report_id", "brand_id", "report_type"],
+      "properties": {
+        "report_id": { "type": "string", "format": "uuid" },
+        "brand_id": { "type": "string", "format": "uuid" },
+        "brand_name": { "type": "string" },
+        "report_type": {
+          "type": "string",
+          "enum": ["weekly_digest", "action_plan", "executive_report"]
+        },
+        "download_url": { "type": "string", "format": "uri" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "generated_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+
+  "oneOf": [
+    {
+      "allOf": [
+        { "$ref": "#/definitions/WebhookEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "score.changed" },
+            "payload": { "$ref": "#/definitions/ScoreChangedPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/WebhookEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "alert.triggered" },
+            "payload": { "$ref": "#/definitions/AlertTriggeredPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/WebhookEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "scan.completed" },
+            "payload": { "$ref": "#/definitions/ScanCompletedPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/WebhookEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "competitor.activity" },
+            "payload": { "$ref": "#/definitions/CompetitorActivityPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/WebhookEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "report.generated" },
+            "payload": { "$ref": "#/definitions/ReportGeneratedPayload" }
+          }
+        }
+      ]
+    }
+  ]
+}
